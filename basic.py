@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+# Single hidden layer neural network
+
 # Step 1: Data Loading
 df = pd.read_csv('train.csv')
 
