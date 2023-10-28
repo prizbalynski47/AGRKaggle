@@ -32,7 +32,7 @@ y_train, y_test = y[:train_size], y[train_size:]
 # Step 4: Model Building
 # Initialize weights and biases
 input_size = X_train.shape[1]
-hidden_size = 10
+hidden_size = 100
 output_size = 1
 learning_rate = 0.01
 
@@ -57,6 +57,7 @@ def sigmoid_derivative(x):
 # Step 5: Training
 epochs = 1000
 losses = []
+test_losses = []
 
 for epoch in range(epochs):
     # Forward pass
@@ -68,6 +69,16 @@ for epoch in range(epochs):
     # Loss calculation
     loss = np.mean((y_train - predicted_output)**2)
     losses.append(loss)
+
+    # Evaluate on test set
+    hidden_layer_input_test = np.dot(X_test, W1) + b1
+    hidden_layer_output_test = relu(hidden_layer_input_test)
+    output_layer_input_test = np.dot(hidden_layer_output_test, W2) + b2
+    predicted_output_test = sigmoid(output_layer_input_test)
+
+    # Calculate test loss
+    test_loss = np.mean((y_test - predicted_output_test)**2)
+    test_losses.append(test_loss)
     
     # Backpropagation
     output_error = y_train - predicted_output
@@ -94,11 +105,13 @@ predicted_labels = (predicted_output > 0.5).astype(int)
 accuracy = np.mean(predicted_labels == y_test)
 print(f"Test Accuracy: {accuracy * 100}%")
 
-# Step 7: Visualization
-plt.plot(losses)
+# Step 7: Visualization (comment out for kaggle submission)
+plt.plot(losses, label='Training Loss')
+plt.plot(test_losses, label='Test Loss')
 plt.xlabel('Epoch')
 plt.ylabel('Loss')
-plt.title('Training Loss')
+plt.title('Training and Test Loss Over Time')
+plt.legend()
 plt.show()
 
 # Step 8: Generate Submission Files
