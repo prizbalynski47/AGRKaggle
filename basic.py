@@ -9,6 +9,9 @@ df = pd.read_csv('train.csv')
 # Handle categorical column "EJ"
 df['EJ'] = df['EJ'].map({'A': 0, 'B': 1})
 
+# remove rows with NaN values
+df.dropna(inplace=True)
+
 # Exclude 'Id' and 'Class' columns from feature columns for normalization
 feature_columns = [col for col in df.columns if col not in ['Id', 'Class']]
 
