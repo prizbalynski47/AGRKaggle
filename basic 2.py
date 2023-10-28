@@ -9,7 +9,7 @@ df = pd.read_csv('train.csv')
 
 # Step 2: Data Preprocessing
 df['EJ'] = df['EJ'].map({'A': 0, 'B': 1})
-df.dropna(inplace=True)
+df.fillna(df.median(numeric_only=True), inplace=True)
 
 feature_columns = [col for col in df.columns if col not in ['Id', 'Class']]
 df[feature_columns] = (df[feature_columns] - df[feature_columns].mean()) / df[feature_columns].std()
@@ -131,8 +131,9 @@ plt.show()
 # Load test data
 test_df = pd.read_csv('test.csv')
 
-# Handle categorical column "EJ"
+# Fix data
 test_df['EJ'] = test_df['EJ'].map({'A': 0, 'B': 1})
+test_df.fillna(test_df.median(numeric_only=True), inplace=True)
 
 # Extract IDs
 test_ids = test_df['Id'].values
