@@ -6,15 +6,17 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
 
 # Simple adjustable nn
 
-NUM_HIDDEN_LAYERS = 3
-HIDDEN_LAYER_SIZE = 100
+NUM_HIDDEN_LAYERS = 40
+HIDDEN_LAYER_SIZE = 20
 
 LEARNING_RATE = 0.001
 WEIGHT_DECAY = 0
-DROPOUT_RATE = 0
+DROPOUT_RATE = 0.1
+DROPOUT_INIT = 0.6
 
 NUM_EPOCHS = 200
 
@@ -54,8 +56,6 @@ test_features = (test_features - mean) / std
 X_test = test_features.values
 
 # Step 3: Data Splitting
-X_train = X
-y_train = y
 
 def add_outliers_with_labels(features, labels, num_outliers, magnitude=10, outlier_label=1):
     """
@@ -84,12 +84,33 @@ def add_outliers_with_labels(features, labels, num_outliers, magnitude=10, outli
 
     return features, labels
 
-# Add outliers to the dataset and corresponding labels
-X_with_outliers, y_with_outliers = add_outliers_with_labels(X.copy(), y.copy(), NUM_OUTLIERS)
+X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
 
-X_data, y_data = X, y
+# Step 4: Feature Selection based on Importance and Mutual Information
 
-X_train, X_val, y_train, y_val = train_test_split(X_data, y_data, test_size=0.2, random_state=42)
+# 4.1 Calculate Feature Importance using Random Forest
+rf = RandomForestClassifier()
+rf.fit(X_train, y_train.ravel())  # Flatten y_train for sklearn compatibility
+feature_importances = rf.feature_importances_
+
+# Normalize both metrics for comparison
+feature_importances_normalized = feature_importances / feature_importances.max()
+
+# Combine metrics (consider different strategies)
+combined_metric = feature_importances_normalized
+
+# Set a threshold for feature selection based on your analysis
+threshold = np.median(combined_metric) * 0.6 # Adjust this based on your analysis
+
+# Select features above the threshold
+selected_features = [feature_columns[i] for i in range(len(combined_metric)) if combined_metric[i] > threshold]
+
+# Apply feature selection to all datasets
+X_train = X_train[:, [feature_columns.index(f) for f in selected_features]]
+X_val = X_val[:, [feature_columns.index(f) for f in selected_features]]
+X_test = X_test[:, [feature_columns.index(f) for f in selected_features]]
+
+X_train, y_train = add_outliers_with_labels(X_train.copy(), y_train.copy(), NUM_OUTLIERS)
 
 # Convert data to PyTorch tensors
 X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
@@ -126,30 +147,49 @@ class BasicNN(nn.Module):
     def __init__(self, input_size, hidden_size, output_size, num_hidden_layers=NUM_HIDDEN_LAYERS, dropout_rate=DROPOUT_RATE):
         super(BasicNN, self).__init__()
 
-        layers = [nn.Linear(input_size, hidden_size), nn.ReLU(), nn.Dropout(dropout_rate)]
+        self.layers = nn.ModuleList()
+        self.skip_connections = nn.ModuleList()
 
-        for i in range(num_hidden_layers - 1):
-            layers += [nn.Linear(hidden_size, hidden_size), nn.ReLU(), nn.Dropout(dropout_rate)]
+        # First layer
+        self.layers.append(nn.Sequential(nn.Linear(input_size, hidden_size), nn.ReLU(), nn.Dropout(DROPOUT_INIT)))
+        # Skip connection for the first layer (if needed)
+        self.initial_skip = nn.Linear(input_size, hidden_size)
 
-        layers += [nn.Linear(hidden_size, output_size), nn.Sigmoid()]
+        # Intermediate layers
+        for _ in range(num_hidden_layers - 1):
+            self.layers.append(nn.Sequential(nn.Linear(hidden_size, hidden_size), nn.ReLU(), nn.Dropout(dropout_rate)))
+            self.skip_connections.append(nn.Linear(hidden_size, hidden_size))
 
-        self.model = nn.Sequential(*layers)
+        # Output layer
+        self.output_layer = nn.Sequential(nn.Linear(hidden_size, output_size), nn.Sigmoid())
 
     def forward(self, x):
-        return self.model(x)
+        skip_input = self.initial_skip(x)  # Transform input to match hidden layer size
+
+        for i, layer in enumerate(self.layers):
+            x = layer(x)
+            if i > 0:  # Skip connections start from the second layer
+                skip = self.skip_connections[i-1](skip_input)
+                x = x + skip  # Element-wise addition
+            skip_input = x  # Update skip_input for the next iteration
+
+        x = self.output_layer(x)
+        return x
 
 model = BasicNN(X_train.shape[1], HIDDEN_LAYER_SIZE, 1)
 
 # Loss and optimizer
 criterion = balanced_log_loss
 optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
-scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', 0.1, 10)
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', 0.9, 10)
 
 # Lists to store metrics
 train_losses = []
 val_losses = []
 train_accuracies = []
 val_accuracies = []
+best_val_loss = float('inf')
+best_model_state = None
 
 # Train the model
 for epoch in range(NUM_EPOCHS):
@@ -192,10 +232,16 @@ for epoch in range(NUM_EPOCHS):
         total_val_loss += val_loss.item()
     avg_val_loss = total_val_loss / len(y_val_tensor)
     val_losses.append(avg_val_loss)
+
+    if avg_val_loss < best_val_loss:
+        best_val_loss = avg_val_loss
+        best_model_state = model.state_dict().copy()
     
-    #scheduler.step(avg_val_loss)
+    scheduler.step(avg_val_loss)
 
 print(f'Epoch {epoch+1}/{NUM_EPOCHS}, Training Loss: {avg_train_loss:.4f}, Training Accuracy: {train_accuracy:.4f}%, Validation Loss: {avg_val_loss:.4f}, Validation Accuracy: {val_accuracy:.4f}%')
+print(f'Best val loss: {best_val_loss:.4f}')
+model.load_state_dict(best_model_state)
 
 # Make predictions
 with torch.no_grad():
