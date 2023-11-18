@@ -3,15 +3,16 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import TensorDataset, DataLoader
 import pandas as pd
+import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 
 # Simple adjustable nn
 
-NUM_HIDDEN_LAYERS = 1
-HIDDEN_LAYER_SIZE = 50
+NUM_HIDDEN_LAYERS = 3
+HIDDEN_LAYER_SIZE = 100
 
-LEARNING_RATE = 0.001
-WEIGHT_DECAY = 0.01
+LEARNING_RATE = 0.0005
+WEIGHT_DECAY = 0.02
 DROPOUT_RATE = 0.5
 
 NUM_EPOCHS = 200
@@ -105,27 +106,59 @@ class BasicNN(nn.Module):
 model = BasicNN(X_train.shape[1], HIDDEN_LAYER_SIZE, 1)
 
 # Loss and optimizer
-criterion = balanced_log_loss
+criterion = nn.BCELoss()
 optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+
+# Lists to store metrics
+train_losses = []
+val_losses = []
+train_accuracies = []
+val_accuracies = []
 
 # Train the model
 for epoch in range(NUM_EPOCHS):
+    model.train()
+    total_loss = 0
     for inputs, labels in train_loader:
         optimizer.zero_grad()
         outputs = model(inputs)
         loss = criterion(outputs, labels)
         loss.backward()
         optimizer.step()
+        total_loss += loss.item()
+    
+    # Training phase
+    model.eval()
+    total_train_loss = 0
+    with torch.no_grad():
+        y_train_pred = model(X_train_tensor)
+        y_train_pred_class = y_train_pred.round().flatten()
+        correct_train = (y_train_pred_class == y_train_tensor.flatten()).sum().item()
+        train_accuracy = correct_train / len(y_train_tensor) * 100
+        train_accuracies.append(train_accuracy)
 
-# Evaluate the model
-model.eval()
-with torch.no_grad():
-    y_val_pred = model(X_val_tensor)
-    y_val_pred_class = y_val_pred.round()
-    y_val_pred_class = y_val_pred_class.flatten().type_as(y_val_tensor)
-    correct = (y_val_pred_class == y_val_tensor.flatten()).sum().item()
-    accuracy = correct / len(y_val_tensor) * 100
-    print(f'Validation Accuracy: {accuracy}%')
+        # Training loss
+        train_loss = criterion(y_train_pred, y_train_tensor)
+        total_train_loss += train_loss.item()
+    avg_train_loss = total_train_loss / len(y_train_tensor)
+    train_losses.append(avg_train_loss)
+
+    # Validation phase
+    total_val_loss = 0
+    with torch.no_grad():
+        y_val_pred = model(X_val_tensor)
+        y_val_pred_class = y_val_pred.round().flatten()
+        correct_val = (y_val_pred_class == y_val_tensor.flatten()).sum().item()
+        val_accuracy = correct_val / len(y_val_tensor) * 100
+        val_accuracies.append(val_accuracy)
+
+        # Validation loss
+        val_loss = criterion(y_val_pred, y_val_tensor)
+        total_val_loss += val_loss.item()
+    avg_val_loss = total_val_loss / len(y_val_tensor)
+    val_losses.append(avg_val_loss)
+
+print(f'Epoch {epoch+1}/{NUM_EPOCHS}, Training Loss: {avg_train_loss:.4f}, Training Accuracy: {train_accuracy:.4f}%, Validation Loss: {avg_val_loss:.4f}, Validation Accuracy: {val_accuracy:.4f}%')
 
 # Make predictions
 with torch.no_grad():
@@ -140,3 +173,27 @@ submission_df = pd.DataFrame({
 
 # Save to CSV
 submission_df.to_csv('submission.csv', index=False)
+
+# Plotting
+plt.figure(figsize=(12, 5))
+
+# Plot for loss
+plt.subplot(1, 2, 1)
+plt.plot(train_losses, label='Training Loss')
+plt.plot(val_losses, label='Validation Loss')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.title('Training and Validation Loss Over Epochs')
+plt.legend()
+
+# Plot for accuracy
+plt.subplot(1, 2, 2)
+plt.plot(train_accuracies, label='Training Accuracy')
+plt.plot(val_accuracies, label='Validation Accuracy')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+plt.title('Training and Validation Accuracy Over Epochs')
+plt.legend()
+
+plt.tight_layout()
+plt.show()

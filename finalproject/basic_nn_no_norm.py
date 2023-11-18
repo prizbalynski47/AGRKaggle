@@ -5,17 +5,7 @@ from torch.utils.data import TensorDataset, DataLoader
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-# Simple adjustable nn
-
-NUM_HIDDEN_LAYERS = 1
-HIDDEN_LAYER_SIZE = 50
-
-LEARNING_RATE = 0.001
-WEIGHT_DECAY = 0.01
-DROPOUT_RATE = 0.5
-
-NUM_EPOCHS = 200
-
+# Simple 1 layer nn with no normalization
 
 # Step 1: Load Train and Test data
 train_df = pd.read_csv('train.csv')
@@ -67,27 +57,9 @@ X_test_tensor = torch.tensor(X_test, dtype=torch.float32)
 train_data = TensorDataset(X_train_tensor, y_train_tensor)
 train_loader = DataLoader(train_data, batch_size=64, shuffle=True)
 
-# Custom Loss
-def balanced_log_loss(output, target, epsilon=1e-7):
-    # Clipping the predicted probabilities
-    output = torch.clamp(output, epsilon, 1 - epsilon)
-
-    # Calculating log loss for each class
-    loss_class_0 = - (1 - target) * torch.log(1 - output)
-    loss_class_1 = - target * torch.log(output)
-
-    # Counting the number of observations in each class
-    n_class_0 = torch.sum(1 - target)
-    n_class_1 = torch.sum(target)
-
-    # Averaging the loss for each class
-    loss = (torch.sum(loss_class_0) / n_class_0 + torch.sum(loss_class_1) / n_class_1) / 2
-
-    return loss
-
 # Model Structure
 class BasicNN(nn.Module):
-    def __init__(self, input_size, hidden_size, output_size, num_hidden_layers=NUM_HIDDEN_LAYERS, dropout_rate=DROPOUT_RATE):
+    def __init__(self, input_size, hidden_size, output_size, num_hidden_layers=1, dropout_rate=0):
         super(BasicNN, self).__init__()
 
         layers = [nn.Linear(input_size, hidden_size), nn.ReLU(), nn.Dropout(dropout_rate)]
@@ -102,14 +74,14 @@ class BasicNN(nn.Module):
     def forward(self, x):
         return self.model(x)
 
-model = BasicNN(X_train.shape[1], HIDDEN_LAYER_SIZE, 1)
+model = BasicNN(X_train.shape[1], 50, 1)
 
 # Loss and optimizer
-criterion = balanced_log_loss
-optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+criterion = nn.BCELoss()
+optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=0)
 
 # Train the model
-for epoch in range(NUM_EPOCHS):
+for epoch in range(100):  # number of epochs
     for inputs, labels in train_loader:
         optimizer.zero_grad()
         outputs = model(inputs)
