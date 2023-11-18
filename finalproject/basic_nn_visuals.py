@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import TensorDataset, DataLoader
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 
@@ -11,11 +12,13 @@ from sklearn.model_selection import train_test_split
 NUM_HIDDEN_LAYERS = 3
 HIDDEN_LAYER_SIZE = 100
 
-LEARNING_RATE = 0.0005
-WEIGHT_DECAY = 0.02
-DROPOUT_RATE = 0.5
+LEARNING_RATE = 0.001
+WEIGHT_DECAY = 0
+DROPOUT_RATE = 0
 
 NUM_EPOCHS = 200
+
+NUM_OUTLIERS = 50
 
 
 # Step 1: Load Train and Test data
@@ -54,7 +57,39 @@ X_test = test_features.values
 X_train = X
 y_train = y
 
-X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
+def add_outliers_with_labels(features, labels, num_outliers, magnitude=10, outlier_label=1):
+    """
+    Adds outliers to the dataset and corresponding labels.
+    features: numpy array of features.
+    labels: numpy array of labels.
+    num_outliers: number of outliers to add.
+    magnitude: the magnitude of the outliers.
+    outlier_label: the label for the outliers.
+    """
+    # Randomly select indices to introduce outliers
+    outlier_indices = np.random.choice(features.shape[0], num_outliers, replace=False)
+
+    # Randomly select features to modify
+    feature_indices = np.random.choice(features.shape[1], num_outliers, replace=True)
+
+    # Add or subtract the magnitude to create outliers
+    for i, feature_index in zip(outlier_indices, feature_indices):
+        if np.random.rand() > 0.5:
+            features[i, feature_index] += magnitude
+        else:
+            features[i, feature_index] -= magnitude
+
+        # Set the corresponding label to the outlier label
+        labels[i] = outlier_label
+
+    return features, labels
+
+# Add outliers to the dataset and corresponding labels
+X_with_outliers, y_with_outliers = add_outliers_with_labels(X.copy(), y.copy(), NUM_OUTLIERS)
+
+X_data, y_data = X, y
+
+X_train, X_val, y_train, y_val = train_test_split(X_data, y_data, test_size=0.2, random_state=42)
 
 # Convert data to PyTorch tensors
 X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
@@ -106,8 +141,9 @@ class BasicNN(nn.Module):
 model = BasicNN(X_train.shape[1], HIDDEN_LAYER_SIZE, 1)
 
 # Loss and optimizer
-criterion = nn.BCELoss()
+criterion = balanced_log_loss
 optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', 0.1, 10)
 
 # Lists to store metrics
 train_losses = []
@@ -127,7 +163,7 @@ for epoch in range(NUM_EPOCHS):
         optimizer.step()
         total_loss += loss.item()
     
-    # Training phase
+    # Validation phase
     model.eval()
     total_train_loss = 0
     with torch.no_grad():
@@ -143,7 +179,6 @@ for epoch in range(NUM_EPOCHS):
     avg_train_loss = total_train_loss / len(y_train_tensor)
     train_losses.append(avg_train_loss)
 
-    # Validation phase
     total_val_loss = 0
     with torch.no_grad():
         y_val_pred = model(X_val_tensor)
@@ -157,6 +192,8 @@ for epoch in range(NUM_EPOCHS):
         total_val_loss += val_loss.item()
     avg_val_loss = total_val_loss / len(y_val_tensor)
     val_losses.append(avg_val_loss)
+    
+    #scheduler.step(avg_val_loss)
 
 print(f'Epoch {epoch+1}/{NUM_EPOCHS}, Training Loss: {avg_train_loss:.4f}, Training Accuracy: {train_accuracy:.4f}%, Validation Loss: {avg_val_loss:.4f}, Validation Accuracy: {val_accuracy:.4f}%')
 
