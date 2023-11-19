@@ -14,7 +14,7 @@ from sklearn.ensemble import RandomForestClassifier
 
 WORST_FEATURES_TO_REMOVE = 0
 NUM_OF_CATS_TO_CHANGE = 55
-NUM_COPIES = 2
+NUM_COPIES = 10
 
 NUM_HIDDEN_LAYERS = 3
 HIDDEN_LAYER_SIZE = [32, 16, 8]
