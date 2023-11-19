@@ -44,12 +44,6 @@ X_test = test_features.values
 # Step 3: Data Splitting
 X_train = X
 y_train = y
-# 4.1 Correlation Matrix
-corr_matrix = train_features.corr()
-plt.figure(figsize=(12, 8))
-sns.heatmap(corr_matrix, annot=True, fmt=".2f")
-plt.title("Feature Correlation Matrix")
-plt.show()
 
 # 4.2 Feature Importance using Random Forest
 rf = RandomForestClassifier()
