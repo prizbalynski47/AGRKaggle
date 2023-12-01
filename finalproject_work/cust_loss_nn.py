@@ -13,14 +13,15 @@ from sklearn.ensemble import RandomForestClassifier
 # Simple adjustable nn
 
 WORST_FEATURES_TO_REMOVE = 0
-NUM_OF_CATS_TO_CHANGE = 55
-NUM_COPIES = 10
+NUM_OF_CATS_TO_CHANGE = 50
+NOISE_SCALE = 1
+NUM_COPIES = 19
 
 NUM_HIDDEN_LAYERS = 3
 HIDDEN_LAYER_SIZE = [32, 16, 8]
 
 LEARNING_RATE = 0.001
-WEIGHT_DECAY = 0.01
+WEIGHT_DECAY = 0.007
 DROPOUT_RATE = [0.75, 0.5, 0.25]
 
 NUM_EPOCHS = 1000
@@ -29,62 +30,76 @@ TRAIN_PER_FOLD = 10
 SAVED_ATTEMPTS_PER_FOLD = 2
 PATIENCE = 25
 
-# Step 1: Load Train and Test data
-train_df = pd.read_csv('train.csv')
-test_df = pd.read_csv('test.csv')
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Step 2: Preprocess Train Data
-train_df['EJ'] = train_df['EJ'].map({'A': 0, 'B': 1})
-train_df.fillna(train_df.median(numeric_only=True), inplace=True)
+# # Step 1: Load Train and Test data
+# train_df = pd.read_csv('train.csv')
 
-# Identify categorical and numerical columns
-categorical_columns = ['EJ', 'Class']  # List of all categorical columns
-numerical_columns = [col for col in train_df.columns if col not in categorical_columns + ['Id']]
-categorical_columns = ['EJ']
-# Normalize the original data
-mean = train_df[numerical_columns].mean()
-std = train_df[numerical_columns].std()
-train_df[numerical_columns] = (train_df[numerical_columns] - mean) / std
+# # Shuffle the DataFrame
+# train_df = train_df.sample(frac=1, random_state=42)  # Setting random_state for reproducibility
+# train_df.reset_index(drop=True, inplace=True)
 
-# Duplicate the DataFrame
-noisy_df = train_df.copy()
+# # Step 2: Preprocess Train Data
+# train_df['EJ'] = train_df['EJ'].map({'A': 0, 'B': 1})
+# train_df.fillna(train_df.median(numeric_only=True), inplace=True)
 
-def flip_categorical(value):
-    return 1 - value
+# # Identify categorical and numerical columns
+# categorical_columns = ['EJ', 'Class']  # List of all categorical columns
+# numerical_columns = [col for col in train_df.columns if col not in categorical_columns + ['Id']]
+# categorical_columns = ['EJ']
+# # Normalize the original data
+# mean = train_df[numerical_columns].mean()
+# std = train_df[numerical_columns].std()
+# train_df[numerical_columns] = (train_df[numerical_columns] - mean) / std
 
-# List to store the rows
-combined_rows = []
+# # Duplicate the DataFrame
+# noisy_df = train_df.copy()
 
-# Create noisy data and interleave with original data
-for index, row in train_df.iterrows():
-    # Append the original row to the list
-    combined_rows.append(row)
-    for i in range(NUM_COPIES):
-        # Create a noisy version of the row
-        noisy_row = row.copy()
-        selected_columns = np.random.choice(categorical_columns + numerical_columns, size=NUM_OF_CATS_TO_CHANGE, replace=False)
-        for col in selected_columns:
-            if col in categorical_columns:
-                noisy_row[col] = flip_categorical(row[col])
-            else:
-                class_category = row['Class']
-                class_std_dev = train_df[train_df['Class'] == class_category][col].std()
-                noise = np.random.choice([-1, 1])
-                noisy_row[col] += noise * class_std_dev
+# def flip_categorical(value):
+#     return 1 - value
 
-        # Append the noisy row to the list
-        combined_rows.append(noisy_row)
+# # List to store the rows
+# combined_rows = []
 
-# Convert the list of rows to a DataFrame
-combined_df = pd.concat(combined_rows, axis=1).transpose()
+# # Modification for Gaussian noise
+# for index, row in train_df.iterrows():
+#     # Append the original row to the list
+#     combined_rows.append(row)
+#     for i in range(NUM_COPIES):
+#         # Create a noisy version of the row
+#         noisy_row = row.copy()
+#         selected_columns = np.random.choice(categorical_columns + numerical_columns, size=NUM_OF_CATS_TO_CHANGE, replace=False)
+#         for col in selected_columns:
+#             if col in categorical_columns:
+#                 noisy_row[col] = flip_categorical(row[col])
+#             else:
+#                 class_category = row['Class']
+#                 class_std_dev = train_df[train_df['Class'] == class_category][col].std()
+#                 # Add Gaussian noise
+#                 gaussian_noise = np.random.normal(0, class_std_dev * NOISE_SCALE)
+#                 noisy_row[col] += gaussian_noise
 
-# Reset index of the combined DataFrame
-combined_df.reset_index(drop=True, inplace=True)
+#         # Append the noisy row to the list
+#         combined_rows.append(noisy_row)
+
+# # Convert the list of rows to a DataFrame
+# combined_df = pd.concat(combined_rows, axis=1).transpose()
+
+# # Reset index of the combined DataFrame
+# combined_df.reset_index(drop=True, inplace=True)
+
+combined_df = pd.read_csv('modified_combined_data.csv')
 
 # Extract features and labels
 feature_columns = [col for col in combined_df.columns if col not in ['Id', 'Class']]
 X = combined_df[feature_columns].values
 y = combined_df['Class'].values.reshape(-1, 1)
+
+# Calculate the indices of the non-noisy data
+non_noisy_indices = []
+for i in range(len(combined_df) // (NUM_COPIES + 1)):
+    # Every NUM_COPIES + 1 index is the start of a new original data point
+    non_noisy_indices.extend(range(i * (NUM_COPIES + 1), (i + 1) * (NUM_COPIES + 1)))
 
 y_values = combined_df['Class'].values
 y_values = pd.to_numeric(y_values, errors='coerce')
@@ -106,11 +121,13 @@ train_features = combined_df[feature_columns]
 X = train_features.values
 
 # Step 3: Preprocess Test Data
-test_df['EJ'] = test_df['EJ'].map({'A': 0, 'B': 1})
-test_df.fillna(train_df.median(numeric_only=True), inplace=True)
+test_df = pd.read_csv('test.csv')
 
-# Normalize using mean and std from train data
-test_df[numerical_columns] = (test_df[numerical_columns] - mean) / std
+test_df['EJ'] = test_df['EJ'].map({'A': 0, 'B': 1})
+# test_df.fillna(train_df.median(numeric_only=True), inplace=True)
+
+# # Normalize using mean and std from train data
+# test_df[numerical_columns] = (test_df[numerical_columns] - mean) / std
 
 test_features = test_df[feature_columns]
 
@@ -118,7 +135,7 @@ test_features = test_df[feature_columns]
 X_test = test_features.values
 X_test_tensor = torch.tensor(X_test, dtype=torch.float32)
 
-kf = KFold(n_splits=K_FOLDS, shuffle=True, random_state=42)
+kf = KFold(n_splits=K_FOLDS, shuffle=False) # True , random_state=42)
 
 # Custom Loss
 def balanced_log_loss(output, target, epsilon=1e-7):
@@ -165,7 +182,7 @@ val_losses = []
 train_accuracies = []
 val_accuracies = []
 val_losses_full = []
-best_attempt_data = {"val_loss": 0}
+best_attempt_data = {"val_loss": 0, "val_accuracies": [0]}
 
 for fold, (train_index, val_index) in enumerate(kf.split(X)):
     # Initialize variables to track the best attempt
@@ -173,7 +190,7 @@ for fold, (train_index, val_index) in enumerate(kf.split(X)):
     best_attempts_heap = []
 
     for attempt in range(TRAIN_PER_FOLD):
-        sys.stdout.write(f"\rFold {fold + 1}/{K_FOLDS}, Attempt {attempt + 1}/{TRAIN_PER_FOLD}. Last loss: {best_attempt_data['val_loss']:.5f}")
+        sys.stdout.write(f"\rFold {fold + 1}/{K_FOLDS}, Attempt {attempt + 1}/{TRAIN_PER_FOLD}. Last Loss: {best_attempt_data['val_loss']}, Last Accuracy: {best_attempt_data['val_accuracies'][-1]}")
         sys.stdout.flush()
         
         attempt_best_val_loss = float('inf')
@@ -184,8 +201,13 @@ for fold, (train_index, val_index) in enumerate(kf.split(X)):
         temp_train_accuracies = []
         temp_val_accuracies = []
 
-        # Split data
-        X_train_fold, X_val_fold = X[train_index], X[val_index]
+        # Filter out only the non-noisy indices for validation
+        val_non_noisy_indices = [index for index in val_index if index in non_noisy_indices]
+
+        # Extract training and non-noisy validation data
+        X_train_fold, X_val_fold = X[train_index], X[val_non_noisy_indices]
+        y_train_fold, y_val_fold = y[train_index], y[val_non_noisy_indices]
+
         if isinstance(X_train_fold, pd.DataFrame):
             X_train_fold = X_train_fold.values.astype(np.float32)
         elif isinstance(X_train_fold, np.ndarray):
@@ -194,8 +216,6 @@ for fold, (train_index, val_index) in enumerate(kf.split(X)):
             X_val_fold = X_val_fold.values.astype(np.float32)
         elif isinstance(X_val_fold, np.ndarray):
             X_val_fold = X_val_fold.astype(np.float32)
-        
-        y_train_fold, y_val_fold = y[train_index], y[val_index]
         if isinstance(y_train_fold, pd.DataFrame):
             y_train_fold = y_train_fold.values.astype(np.float32)
         elif isinstance(y_train_fold, np.ndarray):
@@ -217,12 +237,14 @@ for fold, (train_index, val_index) in enumerate(kf.split(X)):
 
         # Initialize model for the current fold
         model = BasicNN(X_train_fold.shape[1], HIDDEN_LAYER_SIZE, 1)
+        model.to(device)
         criterion = balanced_log_loss
         optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
         scheduler = optim.lr_scheduler.StepLR(optimizer, 1, 0.1)
         # Train the model
         for epoch in range(NUM_EPOCHS):
             for inputs, labels in train_loader:
+                inputs, labels = inputs.to(device), labels.to(device)
                 optimizer.zero_grad()
                 outputs = model(inputs)
                 loss = criterion(outputs, labels)
@@ -233,6 +255,8 @@ for fold, (train_index, val_index) in enumerate(kf.split(X)):
             model.eval()
             total_train_loss = 0
             with torch.no_grad():
+                X_train_tensor = X_train_tensor.to(device)
+                y_train_tensor = y_train_tensor.to(device)
                 y_train_pred = model(X_train_tensor)
                 y_train_pred_class = y_train_pred.round().flatten()
                 correct_train = (y_train_pred_class == y_train_tensor.flatten()).sum().item()
@@ -245,6 +269,8 @@ for fold, (train_index, val_index) in enumerate(kf.split(X)):
 
             total_val_loss = 0
             with torch.no_grad():
+                X_val_tensor = X_val_tensor.to(device)
+                y_val_tensor = y_val_tensor.to(device)
                 y_val_pred = model(X_val_tensor)
                 y_val_pred_class = y_val_pred.round().flatten()
                 correct_val = (y_val_pred_class == y_val_tensor.flatten()).sum().item()
@@ -316,7 +342,7 @@ avg_val_losses = [np.mean([val_losses[f][epoch] for f in range(K_FOLDS)]) for ep
 avg_train_accuracies = [np.mean([train_accuracies[f][epoch] for f in range(K_FOLDS)]) for epoch in range(max_epochs)]
 avg_val_accuracies = [np.mean([val_accuracies[f][epoch] for f in range(K_FOLDS)]) for epoch in range(max_epochs)]
 
-print(f'Averages, Training Loss: {avg_train_losses[-1]:.4f}, Training Accuracy: {avg_train_accuracies[-1]:.4f}%, Validation Loss: {avg_val_losses[-1]:.5f}, Validation Accuracy: {avg_val_accuracies[-1]:.4f}%')
+print(f'Averages, Training Loss: {avg_train_losses[-1]:.7f}, Training Accuracy: {avg_train_accuracies[-1]:.4f}%, Validation Loss: {avg_val_losses[-1]:.7f}, Validation Accuracy: {avg_val_accuracies[-1]:.4f}%')
 print(f"Full average val loss: {np.mean(val_losses_full)}")
 
 # Aggregate predictions from each fold
@@ -326,6 +352,7 @@ for state_dict in models:
     model.load_state_dict(state_dict)
     model.eval()
     with torch.no_grad():
+        X_test_tensor = X_test_tensor.to(device)
         fold_prediction = model(X_test_tensor)
         test_predictions.append(fold_prediction)
 
@@ -333,6 +360,7 @@ for state_dict in models:
 avg_test_predictions = torch.mean(torch.stack(test_predictions), dim=0)
 
 # Convert predictions to numpy array
+avg_test_predictions = avg_test_predictions.cpu()
 final_predictions = avg_test_predictions.numpy()
 
 # Calculate the total estimated probability for each class
